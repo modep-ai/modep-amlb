@@ -9,13 +9,13 @@ import pandas as pd
 
 from celery import shared_task
 
-from app_utils.models import (
+from modep_common.models import (
     db,
     User,
     TabularFramework,
     TabularFrameworkPredictions,
 )
-from app_utils.io import StorageClient
+from modep_common.io import StorageClient
 
 logger = logging.getLogger(__name__)
 

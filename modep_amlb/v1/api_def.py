@@ -21,7 +21,7 @@ from flask_apispec import marshal_with, doc, use_kwargs
 from modep_amlb import settings
 from modep_amlb import tasks
 
-from app_utils.models import (
+from modep_common.models import (
     db,
     AnonUser,
     User,
@@ -30,12 +30,12 @@ from app_utils.models import (
     TabularFrameworkService,
 )
 
-from app_utils.schemas import (
+from modep_common.schemas import (
     TabularFrameworkSchema,
     TabularFrameworkParamsSchema,
 )
 
-from app_utils.io import StorageClient
+from modep_common.io import StorageClient
 
 blueprint_name = 'api'
 blueprint = Blueprint(blueprint_name, __name__)

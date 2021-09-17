@@ -4,8 +4,8 @@ import flask
 import tornado.wsgi
 import tornado.httpserver
 
-from app_utils.models import AnonUser, User
-from app_utils import settings
+from modep_common.models import AnonUser, User
+from modep_common import settings
 
 from modep_amlb import app
 

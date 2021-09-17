@@ -14,21 +14,20 @@ from flask_sqlalchemy import SQLAlchemy
 # from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
 
-from app_utils.models import db
-from app_utils import settings
+from modep_common.models import db
+from modep_common import settings
 
 from modep_amlb.v1.api_def import blueprint as blueprint_v1, docs as docs_v1
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-# create the uploads folder if it doesn't already exist
-os.makedirs(settings.UPLOAD_FOLDER, exist_ok=True)
+# # create the uploads folder if it doesn't already exist
+# os.makedirs(settings.UPLOAD_FOLDER, exist_ok=True)
 
 app = Flask(__name__)
 
 app.logger.setLevel(logging.DEBUG)
-app.config['UPLOAD_FOLDER'] = settings.UPLOAD_FOLDER
 app.config['SQLALCHEMY_DATABASE_URI'] = settings.SQLALCHEMY_DATABASE_URI
 app.config['SQLALCHEMY_TRACK_MODIFICATION'] = True
 app.config['JSON_SORT_KEYS'] = False

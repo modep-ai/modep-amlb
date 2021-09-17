@@ -4,23 +4,25 @@ WORKDIR /bench
 
 ENV DEBIAN_FRONTEND noninteractive
 
-ARG ssh_prv_key
-ARG ssh_pub_key
+# ARG ssh_prv_key
+# ARG ssh_pub_key
 ARG gcp_creds
 
 RUN apt-get update && \
-    apt-get install -y apt-utils dialog locales curl wget unzip git emacs-nox software-properties-common openssh-server libpq-dev redis-server supervisor
+    apt-get install -y apt-utils dialog locales curl wget unzip git \
+    emacs-nox software-properties-common \
+    openssh-server libpq-dev redis-server supervisor
 
 # Authorize SSH Host
 RUN mkdir -p /root/.ssh && \
     chmod 0700 /root/.ssh && \
     ssh-keyscan github.com > /root/.ssh/known_hosts
 
-# Add the keys and set permissions using keys based as build args
-RUN echo "$ssh_prv_key" > /root/.ssh/id_rsa && \
-    echo "$ssh_pub_key" > /root/.ssh/id_rsa.pub && \
-    chmod 600 /root/.ssh/id_rsa && \
-    chmod 600 /root/.ssh/id_rsa.pub
+# # Add the keys and set permissions using keys based as build args
+# RUN echo "$ssh_prv_key" > /root/.ssh/id_rsa && \
+#     echo "$ssh_pub_key" > /root/.ssh/id_rsa.pub && \
+#     chmod 600 /root/.ssh/id_rsa && \
+#     chmod 600 /root/.ssh/id_rsa.pub
 
 # Create GCP credentials file using base64 encoded build arg
 ENV GOOGLE_APPLICATION_CREDENTIALS=/var/secrets/gcp-creds.json
@@ -63,29 +65,24 @@ RUN mkdir -p /etc/supervisor/conf.d/
 COPY ./supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY ./redis.conf /etc/redis.conf
 
-# ADD modep_amlb /bench/modep_amlb
-ADD . /bench/modep_amlb
+# add all of the code
+RUN git clone https://github.com/modep-ai/modep-common.git /bench/modep-common
+RUN git clone https://github.com/modep-ai/automlbenchmark.git /bench/automlbenchmark
+ADD . /bench/modep-amlb
 
-# ADD automlbenchmark /bench/automlbenchmark
-RUN git clone git@github.com:jimgoo/automlbenchmark.git /bench/automlbenchmark
-
-# ADD app_utils /bench/app_utils
-RUN git clone git@github.com:jimgoo/modep-common.git /bench/modep-common
-
-# remove installation artifacts
+# remove installation artifacts just in case
 RUN rm -rf /bench/automlbenchmark/frameworks/*/venv
 RUN rm -rf /bench/automlbenchmark/frameworks/*/.installed
 RUN rm -rf /bench/automlbenchmark/frameworks/*/.setup_env
 RUN rm -rf /bench/automlbenchmark/frameworks/*/lib
 
-# install common
+# install modep-common
 RUN $PIP install --no-cache-dir -r /bench/modep-common/requirements.txt
 RUN $PIP install --no-cache-dir /bench/modep-common/
 
-# install modep_amlb
-RUN $PIP install --no-cache-dir -r /bench/modep_amlb/requirements.txt
-# -e needed for templates to be in the right place
-RUN $PIP install --no-cache-dir /bench/modep_amlb/
+# install modep-amlb (-e needed for templates to be in the right place)
+RUN $PIP install --no-cache-dir -r /bench/modep-amlb/requirements.txt
+RUN $PIP install --no-cache-dir /bench/modep-amlb/
 
 # install automlbenchmark in the same order as requirements.txt
 RUN (grep -v '^\s*#' | xargs -L 1 $PIP install --no-cache-dir) < /bench/automlbenchmark/requirements.txt
