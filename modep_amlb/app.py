@@ -4,7 +4,7 @@ import flask
 import tornado.wsgi
 import tornado.httpserver
 
-from modep_common.models import AnonUser, User
+from modep_common.models import AnonUser
 from modep_common import settings
 
 from modep_amlb import app
@@ -13,12 +13,8 @@ from modep_amlb import app
 def print_objs():
     """ Test DB connection by printing some objects """
     with app.app_context():
-        print('-'*100)
-        print('objects')
         print("AnonUser")
         print(AnonUser.query.all())
-        print("User")
-        print(User.query.all())
 
 
 # @celery.task()

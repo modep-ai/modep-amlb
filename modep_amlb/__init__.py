@@ -7,11 +7,10 @@ logging.basicConfig(
 
 import os
 import datetime
+import secrets
 from flask import Flask
 import flask_login
 from flask_sqlalchemy import SQLAlchemy
-## handled by main `flask_app`
-# from flask_migrate import Migrate
 from flask_jwt_extended import JWTManager
 
 from modep_common.models import db
@@ -22,31 +21,24 @@ from modep_amlb.v1.api_def import blueprint as blueprint_v1, docs as docs_v1
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-# # create the uploads folder if it doesn't already exist
-# os.makedirs(settings.UPLOAD_FOLDER, exist_ok=True)
-
 app = Flask(__name__)
 
 app.logger.setLevel(logging.DEBUG)
 app.config['SQLALCHEMY_DATABASE_URI'] = settings.SQLALCHEMY_DATABASE_URI
-app.config['SQLALCHEMY_TRACK_MODIFICATION'] = True
+app.config['SQLALCHEMY_TRACK_MODIFICATION'] = False
 app.config['JSON_SORT_KEYS'] = False
 app.config['EXPLAIN_TEMPLATE_LOADING'] = False
-app.config['SECRET_KEY'] = 'iVrGj21Ps8S9YeyIorg9iMbIKDSEHRE5'
-app.config["JWT_SECRET_KEY"] = 'iVrGj21Ps8S9YeyIorg9iMbIKDSEHRE5'
+app.config['SECRET_KEY'] = secrets.token_urlsafe(24)
+app.config["JWT_SECRET_KEY"] = os.environ.get('JWT_SECRET_KEY', secrets.token_urlsafe(24))
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=2)
 
 app.register_blueprint(blueprint_v1, url_prefix="/v1")
 
-'''
-Next line commented out due to error inside marshmallow (we don't need docs for this service anyway)
-  File "/bench/venv/lib/python3.7/site-packages/apispec/ext/marshmallow/field_converter.py", line 219, in field2default
-    default = field.load_default
-AttributeError: 'String' object has no attribute 'load_default'
-'''
+## Next line commented out due to error inside marshmallow (we don't need docs for this service anyway)
 # docs_v1.init_app(app)
 
 # db = SQLAlchemy(app)
+
 db.init_app(app)
 
 ## don't need migrations b/c they're handled by flask_app
@@ -81,10 +73,4 @@ app.config.update(
     CELERY_RESULT_BACKEND='redis://localhost:6379'
 )
 celery = make_celery(app)
-
-# @celery.task()
-# def add_together(a, b):
-#     print('Adding', a, b)
-#     return a + b
-
 app.celery = celery
