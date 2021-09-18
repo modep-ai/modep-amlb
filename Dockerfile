@@ -88,22 +88,22 @@ RUN $PIP install --no-cache-dir /bench/modep-amlb/
 RUN (grep -v '^\s*#' | xargs -L 1 $PIP install --no-cache-dir) < /bench/automlbenchmark/requirements.txt
 
 # run setup for a single test framework
-RUN $PY /bench/automlbenchmark/runbenchmark.py constantpredictor -s only
+# RUN $PY /bench/automlbenchmark/runbenchmark.py constantpredictor -s only
 
 ## run setup for all frameworks that we want to use
-# RUN $PY /bench/automlbenchmark/runbenchmark.py autogluon -s only
-# RUN $PY /bench/automlbenchmark/runbenchmark.py autosklearn -s only
-# RUN $PY /bench/automlbenchmark/runbenchmark.py autoweka -s only
-# RUN $PY /bench/automlbenchmark/runbenchmark.py flaml -s only
-# RUN $PY /bench/automlbenchmark/runbenchmark.py gama -s only
-# RUN $PY /bench/automlbenchmark/runbenchmark.py h2oautoml -s only
-# RUN $PY /bench/automlbenchmark/runbenchmark.py hyperoptsklearn -s only
-# RUN $PY /bench/automlbenchmark/runbenchmark.py mljarsupervised -s only
-# RUN $PY /bench/automlbenchmark/runbenchmark.py mlnet -s only
-# RUN $PY /bench/automlbenchmark/runbenchmark.py tpot -s only
-# RUN $PY /bench/automlbenchmark/runbenchmark.py constantpredictor -s only
-# RUN $PY /bench/automlbenchmark/runbenchmark.py randomforest -s only
-# RUN $PY /bench/automlbenchmark/runbenchmark.py tunedrandomforest -s only
+RUN $PY /bench/automlbenchmark/runbenchmark.py autogluon -s only
+RUN $PY /bench/automlbenchmark/runbenchmark.py autosklearn -s only
+RUN $PY /bench/automlbenchmark/runbenchmark.py autoweka -s only
+RUN $PY /bench/automlbenchmark/runbenchmark.py flaml -s only
+RUN $PY /bench/automlbenchmark/runbenchmark.py gama -s only
+RUN $PY /bench/automlbenchmark/runbenchmark.py h2oautoml -s only
+RUN $PY /bench/automlbenchmark/runbenchmark.py hyperoptsklearn -s only
+RUN $PY /bench/automlbenchmark/runbenchmark.py mljarsupervised -s only
+RUN $PY /bench/automlbenchmark/runbenchmark.py mlnet -s only
+RUN $PY /bench/automlbenchmark/runbenchmark.py tpot -s only
+RUN $PY /bench/automlbenchmark/runbenchmark.py constantpredictor -s only
+RUN $PY /bench/automlbenchmark/runbenchmark.py randomforest -s only
+RUN $PY /bench/automlbenchmark/runbenchmark.py tunedrandomforest -s only
 
 EXPOSE 8080
 
