@@ -98,10 +98,8 @@ def runbenchmark(self, framework_pk, framework_name, dataset_id, constraint_id, 
     """
     logger.info('self.request: %s', str(vars(self.request)))
 
-    ## update things that should be set before running
+    # Add the celery task ID to the DB
     framework = TabularFramework.query.filter_by(pk=framework_pk).one()
-    framework.outdir = outdir
-    # get and save the celery task id
     framework.task_id = self.request.id
     db.session.add(framework)
     db.session.commit()
@@ -123,11 +121,6 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
 
     framework = TabularFramework.query.filter_by(pk=framework_pk).one()
     user = User.query.filter_by(pk=framework.user_pk).one()
-
-    # upload results to GCP bucket
-    # gcp_path = f"tabular-frameworks/{user.id}/{framework.id}.zip"
-    # zip_and_upload(outdir, gcp_path)
-    # framework.gcp_path = gcp_path
 
     #-----------------------------------------------------
     # metadata.json (one file per fold)
@@ -297,14 +290,6 @@ def runbenchmark_predict(self, framework_pk, framework_name, dataset_id, constra
     """
     logger.info('self.request: %s', str(vars(self.request)))
 
-    # ## update things that should be set before running
-    # framework = TabularFramework.query.filter_by(pk=framework_pk).one()
-    # framework.outdir = outdir
-    # # get and save the celery task id
-    # framework.task_id = self.request.id
-    # db.session.add(framework)
-    # db.session.commit()
-
     runbenchmark_cmd = get_runbenchmark_cmd()
     cmd = f"{runbenchmark_cmd} {framework_name} {dataset_id} {constraint_id} -o {outdir} -u {user_dir} --logging debug"
     exit_code = run_cmd(cmd)
@@ -318,9 +303,6 @@ def runbenchmark_predict_on_success(prev_result, outdir, preds_pk):
 
     preds = TabularFrameworkPredictions.query.filter_by(pk=preds_pk).one()
 
-    # TODO: will these be ordered for n_folds >= 10?
-    # - first wildcard is like `randomforest.benchmark.constraint.local.20210611T190804`
-    # - second wildcard is over folds (0, 1, ...)
     fs = sorted(glob.glob(outdir + '/*/predictions/files/*/predictions.csv'))
 
     if len(fs) == 0:

@@ -65,7 +65,11 @@ RUN mkdir -p /etc/supervisor/conf.d/
 COPY ./supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY ./redis.conf /etc/redis.conf
 
-# add all of the code
+# invalidate the docker cache for these repos so that git clone always clones the latest
+ADD https://api.github.com/repos/modep-ai/modep-common/git/refs/heads/main /bench/modep-common-version.json
+ADD https://api.github.com/repos/modep-ai/automlbenchmark/git/refs/heads/master /bench/automlbenchmark-version.json
+
+# get all code
 RUN git clone https://github.com/modep-ai/modep-common.git /bench/modep-common
 RUN git clone https://github.com/modep-ai/automlbenchmark.git /bench/automlbenchmark
 ADD . /bench/modep-amlb

@@ -132,15 +132,17 @@ class TabularFrameworkTrain(MethodResource, Resource):
 
         framework = TabularFramework(**kwargs)
         framework.status = 'RUNNING'
+
+        outdir = tempfile.NamedTemporaryFile().name
+        framework.outdir = outdir
+        logger.info('Saving output to %s', outdir)
+
         db.session.add(framework)
         db.session.commit()
 
         # Fetch this here and use it instead of framework.pk due to DB session
         # timeout in SQLAlchemy when lazily getting object properties.
         framework_pk = framework.pk
-
-        outdir = tempfile.NamedTemporaryFile().name
-        logger.info('Saving output to %s', outdir)
 
         if os.path.exists(outdir):
             shutil.rmtree(outdir)
