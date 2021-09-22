@@ -114,7 +114,6 @@ def runbenchmark(self, framework_pk, framework_name, dataset_id, constraint_id, 
     return exit_code
 
 
-
 @shared_task(name='tasks.runbenchmark_on_success')
 def runbenchmark_on_success(prev_result, framework_pk, outdir):
     """
@@ -221,35 +220,30 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
         remove_files(outdir)
         return
 
-    # preds = []
-    # for i, f in enumerate(fs):
-    #     preds.append(pd.read_csv(f).to_dict('records'))
-
     # should be same length as `preds`
     test_ids = json.loads(framework.test_ids)
 
     sc = StorageClient()
 
     for model_fold, local_path in enumerate(fs):
-        # find the dataset belonging to this user with the matching name
-        dset = TabularDataset.query.filter_by(name=test_ids[model_fold], user_pk=user.pk).one()
-
-        _, ext = os.path.splitext(local_path)
+        dset = TabularDataset.query.filter_by(id=test_ids[model_fold]).one()
 
         # add predictions to DB
         framework_preds = TabularFrameworkPredictions(framework.pk, dset.pk, model_fold, local_path)
 
         # upload the predictions
+        _, ext = os.path.splitext(local_path)
         gcp_path = f"tabular-framework-preds/{framework_preds.id}/predictions{ext}"
         sc.upload(local_path, gcp_path)
 
         framework_preds.gcp_path = gcp_path
+        framework_preds.status = 'SUCCESS'
         db.session.add(framework_preds)
 
     #-----------------------------------------------------
     # model related (leaderboard.csv, models.txt)
 
-    if 'h2o' in framework.framework_id.lower():
+    if 'h2o' in framework.framework_name.lower():
         fs = glob.glob(outdir + '/*/models/files/*/leaderboard.csv')
     else:
         # AutoGluon case

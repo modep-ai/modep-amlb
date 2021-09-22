@@ -30,7 +30,7 @@ from modep_common.schemas import (
     TabularFrameworkSchema,
     TabularFrameworkParamsSchema,
     TabularFrameworkPredictSchema,
-    TabularFrameworkPredictionsSchema,    
+    TabularFrameworkPredictionsSchema,
 )
 
 from modep_common.io import StorageClient
@@ -40,7 +40,6 @@ from modep_amlb import tasks
 
 BLUEPRINT = 'api'
 TAG = 'Frameworks'
-USE_CELERY = int(os.environ.get('USE_CELERY', '1'))
 
 blueprint = Blueprint(BLUEPRINT, __name__)
 api = Api(blueprint)
@@ -77,6 +76,16 @@ constraint:
 """
 
 
+def tabular_dataset_by_id(id):
+    objs = TabularDataset.query.filter_by(id=id)
+    if objs.count() == 0:
+        abort(500, message=f"No dataset found with the id: '{id}'")
+    elif objs.count() == 1:
+        return objs[0]
+    elif objs.count() > 1:
+        abort(500, message=f"Multiple datasets found with the id: '{id}'")
+
+
 def yaml_path_string(paths):
     """ Create yaml for a list of paths """
     out = ''
@@ -102,15 +111,24 @@ class TabularFrameworkTrain(MethodResource, Resource):
 
         user = User.query.filter_by(api_key=get_jwt_identity()).one()
         user_pk = user.pk
-        kwargs['user_pk'] = user_pk
-
-        # TODO: can train/test have a different number of folds?
         n_folds = len(kwargs['train_ids'])
-        kwargs['n_folds'] = n_folds
 
-        framework_id = kwargs['framework_id']
-        framework_service = TabularFrameworkService.query.filter_by(framework_id=framework_id).one()
-        kwargs['framework_name'] = framework_service.framework_name
+        framework_name = kwargs['framework_name'].lower()
+        # framework_id is the lower cased framework name
+        framework_svc = TabularFrameworkService.query.filter_by(framework_id=framework_name)
+        count = framework_svc.count()
+        if count == 0:
+            names = [x.framework_name for x in TabularFrameworkService.query.filter_by(framework_name=framework_name).all()]
+            names = ', '.join(names)
+            abort(404, message=f"Unknown framework name: {framework_name}, should be one of: {names}")
+        elif count > 1:
+            abort(404, message=f"Multiple frameworks with name: {framework_name}")
+        framework_svc = framework_svc[0]
+
+        # add things for creating TabularFramework object
+        kwargs['user_pk'] = user_pk
+        kwargs['n_folds'] = n_folds
+        kwargs['framework_name'] = framework_name
 
         framework = TabularFramework(**kwargs)
         framework.status = 'RUNNING'
@@ -133,27 +151,17 @@ class TabularFrameworkTrain(MethodResource, Resource):
 
         sc = StorageClient()
 
-        def tabular_dataset_by_name(name):
-            # different users can have one dataset with the same name
-            objs = TabularDataset.query.filter_by(name=name, user_pk=user_pk)
-            if objs.count() == 0:
-                abort(500, message=f"No dataset found with the name: '{name}'")
-            elif objs.count() == 1:
-                return objs[0]
-            elif objs.count() > 1:
-                abort(500, message=f"Multiple datasets found with the name: '{name}'")
-
         train = []
         for i, id in enumerate(kwargs['train_ids']):
-            dset = tabular_dataset_by_name(id)
+            dset = tabular_dataset_by_id(id)
             dest_path = os.path.join(outdir, 'input-data', 'train', f'{dset.id}_{i}.{dset.ext}')
             sc.download(dset.gcp_path, dest_path)
             train.append(dest_path)
 
         test = []
         for i, id in enumerate(kwargs['test_ids']):
-            dset = tabular_dataset_by_name(id)
-            dest_path = os.path.join(outdir, 'input-data', 'test', f'{dset.id}_{i}.{dset.ext}')            
+            dset = tabular_dataset_by_id(id)
+            dest_path = os.path.join(outdir, 'input-data', 'test', f'{dset.id}_{i}.{dset.ext}')
             sc.download(dset.gcp_path, dest_path)
             test.append(dest_path)
 
@@ -177,21 +185,15 @@ class TabularFrameworkTrain(MethodResource, Resource):
         logger.info(benchmark)
         logger.info(constraint)
 
-        logger.info('USE_CELERY: %i', USE_CELERY)
-
-        if USE_CELERY:
-            # link gets run if first task is successful
-            # link_error gets run if first task fails
-            result = current_app.celery.send_task(
-                'tasks.runbenchmark',
-                args=(framework_pk, kwargs['framework_id'], 'benchmark', 'constraint', outdir, outdir),
-                link=[celery.signature('tasks.runbenchmark_on_success', args=(framework_pk, outdir))],
-                link_error=[celery.signature('tasks.runbenchmark_on_failure', args=(framework_pk, outdir))],
-            )
-            logger.info('celery send_task result: %s', str(result))
-        else:
-            tasks.runbenchmark(framework_pk, kwargs['framework_id'], 'benchmark', 'constraint', outdir, outdir)
-            tasks.on_success(None, framework_pk, outdir)
+        # link gets run if first task is successful
+        # link_error gets run if first task fails
+        result = current_app.celery.send_task(
+            'tasks.runbenchmark',
+            args=(framework_pk, framework_name, 'benchmark', 'constraint', outdir, outdir),
+            link=[celery.signature('tasks.runbenchmark_on_success', args=(framework_pk, outdir))],
+            link_error=[celery.signature('tasks.runbenchmark_on_failure', args=(framework_pk, outdir))],
+        )
+        logger.info('celery send_task result: %s', str(result))
 
         # Re-query because it could have been a long time since creating the object
         # was created above before training and SQL session could be detached.
@@ -219,9 +221,11 @@ class TabularFrameworkPredict(MethodResource, Resource):
         framework_pk = framework.pk
         framework_name = framework.framework_name
 
-        # TODO: default to the fold of the dataset_ids
+        # TODO: default to the fold used in training for this dataset
         model_fold = 0
-        n_folds = 1
+
+        # TODO: set to users maximum allowed training time
+        max_runtime_seconds = 3600 # kwargs['max_runtime_seconds']
 
         outdir = tempfile.NamedTemporaryFile().name
         logger.info('Saving output to %s', outdir)
@@ -235,26 +239,16 @@ class TabularFrameworkPredict(MethodResource, Resource):
 
         sc = StorageClient()
 
-        def tabular_dataset_by_name(name):
-            # different users can have one dataset with the same name
-            objs = TabularDataset.query.filter_by(name=name, user_pk=user_pk)
-            if objs.count() == 0:
-                abort(500, message=f"No dataset found with the name: '{name}'")
-            elif objs.count() == 1:
-                return objs[0]
-            elif objs.count() > 1:
-                abort(500, message=f"Multiple datasets found with the name: '{name}'")
-
         # TODO: training IDs aren't used but we need to have something
         train_ids = json.loads(framework.train_ids)
         train = []
         for i, id in enumerate(train_ids):
-            dset = tabular_dataset_by_name(id)
+            dset = tabular_dataset_by_id(id)
             dest_path = os.path.join(outdir, 'input-data', 'train', f'{dset.id}_{i}.{dset.ext}')
             sc.download(dset.gcp_path, dest_path)
             train.append(dest_path)
 
-        dset = tabular_dataset_by_name(kwargs['dataset_id'])
+        dset = tabular_dataset_by_id(kwargs['dataset_id'])
         dest_path = os.path.join(outdir, 'input-data', 'test', f'{dset.id}_{0}.{dset.ext}')
         sc.download(dset.gcp_path, dest_path)
         test = [dest_path]
@@ -279,12 +273,12 @@ class TabularFrameworkPredict(MethodResource, Resource):
 
         config = config_template.format(outdir=outdir)
         benchmark = benchmark_template.format(train=train, test=test, target=framework.target,
-                                              n_folds=n_folds,
-                                              max_runtime_seconds=kwargs['max_runtime_seconds'],
+                                              n_folds=1,
+                                              max_runtime_seconds=max_runtime_seconds,
                                               task_type='predict', # default task
                                               model_path=model_path,
                                               )
-        constraint = constraint_template.format(max_runtime_seconds=kwargs['max_runtime_seconds'])
+        constraint = constraint_template.format(max_runtime_seconds=max_runtime_seconds)
 
         # write all yaml files
         write_string(config, 'config.yaml', outdir)
