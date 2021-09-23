@@ -119,146 +119,162 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
     prev_result is not used (required to be passed b/c of the task linkage with `runbenchmark`)
     """
 
-    framework = TabularFramework.query.filter_by(pk=framework_pk).one()
-    user = User.query.filter_by(pk=framework.user_pk).one()
+    try:
 
-    #-----------------------------------------------------
-    # metadata.json (one file per fold)
+        framework = TabularFramework.query.filter_by(pk=framework_pk).one()
+        user = User.query.filter_by(pk=framework.user_pk).one()
 
-    fs = sorted(glob.glob(outdir + '/*/predictions/files/*/metadata.json'))
-    metadatas = []
-    for i, f in enumerate(fs):
-        with open(f, 'r') as fin:
-            metadata = json.load(fin)
-        metadatas.append(metadata)
+        #-----------------------------------------------------
+        # metadata.json (one file per fold)
 
-    framework.fold_meta = metadatas
+        fs = sorted(glob.glob(outdir + '/*/predictions/files/*/metadata.json'))
+        metadatas = []
+        for i, f in enumerate(fs):
+            with open(f, 'r') as fin:
+                metadata = json.load(fin)
+            metadatas.append(metadata)
 
-    # get the names of any metric columns in the results DataFrame below (same for all folds)
-    metric_cols = metadatas[0]['metrics']
+        framework.fold_meta = metadatas
 
-    #-----------------------------------------------------
-    ## results.csv (one file for all folds)
+        # get the names of any metric columns in the results DataFrame below (same for all folds)
+        metric_cols = metadatas[0]['metrics']
 
-    # should only be one results.csv file (has all folds)
-    # usually results are there even if there was a failure
+        #-----------------------------------------------------
+        ## results.csv (one file for all folds)
 
-    logger.debug('Searching for results files with glob: %s', outdir + '/*/scores/results.csv')
-    fs = glob.glob(outdir + '/*/scores/results.csv')
-    assert len(fs) == 1, len(fs)
+        # should only be one results.csv file (has all folds)
+        # usually results are there even if there was a failure
 
-    results = pd.read_csv(fs[0])
+        logger.debug('Searching for results files with glob: %s', outdir + '/*/scores/results.csv')
+        fs = glob.glob(outdir + '/*/scores/results.csv')
+        assert len(fs) == 1, len(fs)
 
-    gcp_model_paths = []
-    if 'model_path' in results.columns:
-        # has a saved model for each fold
-        for _, row in results.iterrows():
-            fold = row['fold']
-            model_path = row['model_path']
-            if model_path[-1] == '/':
-                model_path = model_path[:-1]
-            gcp_path = f"tabular-frameworks/{user.id}/{framework.id}/models/{fold}.zip"
-            zip_and_upload(model_path, gcp_path)
-            gcp_model_paths.append(gcp_path)
-            remove_files(model_path)
-    else:
-        logger.debug('Not uploading any models')
-    framework.gcp_model_paths = gcp_model_paths
+        results = pd.read_csv(fs[0])
 
-    base_cols = ['framework', 'version', 'fold', 'type', 'result', 'metric',
-                 'duration', 'training_duration', 'predict_duration',
-                 'models_count', 'seed', 'info']
-
-    results = results[base_cols + metric_cols]
-    results = results.where(pd.notnull(results), None)
-
-    other_metrics = {}
-    for metric_name in metric_cols:
-        metric_mean = results[metric_name].mean()
-        if np.isnan(metric_mean):
-            metric_mean = None
+        gcp_model_paths = []
+        if 'model_path' in results.columns:
+            # has a saved model for each fold
+            for _, row in results.iterrows():
+                fold = row['fold']
+                model_path = row['model_path']
+                if not isinstance(model_path, str):
+                    # there was an error saving the model
+                    gcp_model_paths.append(None)
+                    continue
+                if model_path[-1] == '/':
+                    model_path = model_path[:-1]
+                gcp_path = f"tabular-frameworks/{user.id}/{framework.id}/models/{fold}.zip"
+                zip_and_upload(model_path, gcp_path)
+                gcp_model_paths.append(gcp_path)
+                remove_files(model_path)
         else:
-            metric_mean = float(metric_mean)
-        other_metrics[metric_name] = metric_mean
+            logger.debug('Not uploading any models')
+        framework.gcp_model_paths = gcp_model_paths
 
-    metric_value = results['result'].mean()
-    if np.isnan(metric_value):
-        metric_value = None
-    else:
-        metric_value = float(metric_value)
+        base_cols = ['framework', 'version', 'fold', 'type', 'result', 'metric',
+                     'duration', 'training_duration', 'predict_duration',
+                     'models_count', 'seed', 'info']
 
-    framework.other_metrics = other_metrics
-    framework.fold_results = results.to_dict('records')
-    framework.version = results['version'].values[0]
-    framework.metric_name = results['metric'].values[0]
-    framework.metric_value = metric_value
-    framework.problem_type = results['type'].values[0]
-    for c in ('duration', 'training_duration', 'predict_duration'):
-        setattr(framework, c, float(results[c].sum()))
-    framework.models_count = int(results['models_count'].sum())
-    framework.info = '\n'.join([str(x) for x in results['info'].values])
+        results = results[base_cols + metric_cols]
+        results = results.where(pd.notnull(results), None)
 
-    #-----------------------------------------------------
-    # predictions.csv (one file per fold)
+        other_metrics = {}
+        for metric_name in metric_cols:
+            metric_mean = results[metric_name].mean()
+            if np.isnan(metric_mean):
+                metric_mean = None
+            else:
+                metric_mean = float(metric_mean)
+            other_metrics[metric_name] = metric_mean
 
-    # TODO: will these be ordered for n_folds >= 10?
-    # - first wildcard is like `randomforest.benchmark.constraint.local.20210611T190804`
-    # - second wildcard is over folds (0, 1, ...)
-    fs = sorted(glob.glob(outdir + '/*/predictions/files/*/predictions.csv'))
+        metric_value = results['result'].mean()
+        if np.isnan(metric_value):
+            metric_value = None
+        else:
+            metric_value = float(metric_value)
 
-    if len(fs) == 0:
-        framework.status = 'FAIL'
+        framework.other_metrics = other_metrics
+        framework.fold_results = results.to_dict('records')
+        framework.version = results['version'].values[0]
+        framework.metric_name = results['metric'].values[0]
+        framework.metric_value = metric_value
+        framework.problem_type = results['type'].values[0]
+        for c in ('duration', 'training_duration', 'predict_duration'):
+            setattr(framework, c, float(results[c].sum()))
+        framework.models_count = int(results['models_count'].sum())
+        framework.info = '\n'.join([str(x) for x in results['info'].values])
+
+        #-----------------------------------------------------
+        # predictions.csv (one file per fold)
+
+        # TODO: will these be ordered for n_folds >= 10?
+        # - first wildcard is like `randomforest.benchmark.constraint.local.20210611T190804`
+        # - second wildcard is over folds (0, 1, ...)
+        fs = sorted(glob.glob(outdir + '/*/predictions/files/*/predictions.csv'))
+
+        if len(fs) == 0:
+            framework.status = 'FAIL'
+            db.session.add(framework)
+            db.session.commit()
+            remove_files(outdir)
+            return
+
+        # should be same length as `preds`
+        test_ids = json.loads(framework.test_ids)
+
+        sc = StorageClient()
+
+        for model_fold, local_path in enumerate(fs):
+            dset = TabularDataset.query.filter_by(id=test_ids[model_fold]).one()
+
+            # add predictions to DB
+            framework_preds = TabularFrameworkPredictions(framework.pk, dset.pk, model_fold, local_path)
+
+            # upload the predictions
+            _, ext = os.path.splitext(local_path)
+            gcp_path = f"tabular-framework-preds/{framework_preds.id}/predictions{ext}"
+            sc.upload(local_path, gcp_path)
+
+            framework_preds.gcp_path = gcp_path
+            framework_preds.status = 'SUCCESS'
+            db.session.add(framework_preds)
+
+        #-----------------------------------------------------
+        # model related (leaderboard.csv, models.txt)
+
+        if 'h2o' in framework.framework_name.lower():
+            fs = glob.glob(outdir + '/*/models/files/*/leaderboard.csv')
+        else:
+            # AutoGluon case
+            fs = glob.glob(outdir + '/*/leaderboard/files/*/leaderboard.csv')
+
+        leaderboard = [pd.read_csv(f) for f in fs]
+        leaderboard = [df.where(pd.notnull(df), None) for df in leaderboard]
+        leaderboard = [df.to_dict('records') for df in leaderboard]
+
+        fs = glob.glob(outdir + '/*/models/files/*/models.txt')
+        models_txt = []
+        for f in fs:
+            with open(f, 'r') as fin:
+                models_txt.append(fin.readlines())
+
+        framework.status = 'SUCCESS'
+        framework.fold_leaderboard = leaderboard
+        framework.fold_model_txt = models_txt
+
         db.session.add(framework)
         db.session.commit()
         remove_files(outdir)
-        return
-
-    # should be same length as `preds`
-    test_ids = json.loads(framework.test_ids)
-
-    sc = StorageClient()
-
-    for model_fold, local_path in enumerate(fs):
-        dset = TabularDataset.query.filter_by(id=test_ids[model_fold]).one()
-
-        # add predictions to DB
-        framework_preds = TabularFrameworkPredictions(framework.pk, dset.pk, model_fold, local_path)
-
-        # upload the predictions
-        _, ext = os.path.splitext(local_path)
-        gcp_path = f"tabular-framework-preds/{framework_preds.id}/predictions{ext}"
-        sc.upload(local_path, gcp_path)
-
-        framework_preds.gcp_path = gcp_path
-        framework_preds.status = 'SUCCESS'
-        db.session.add(framework_preds)
-
-    #-----------------------------------------------------
-    # model related (leaderboard.csv, models.txt)
-
-    if 'h2o' in framework.framework_name.lower():
-        fs = glob.glob(outdir + '/*/models/files/*/leaderboard.csv')
-    else:
-        # AutoGluon case
-        fs = glob.glob(outdir + '/*/leaderboard/files/*/leaderboard.csv')
-
-    leaderboard = [pd.read_csv(f) for f in fs]
-    leaderboard = [df.where(pd.notnull(df), None) for df in leaderboard]
-    leaderboard = [df.to_dict('records') for df in leaderboard]
-
-    fs = glob.glob(outdir + '/*/models/files/*/models.txt')
-    models_txt = []
-    for f in fs:
-        with open(f, 'r') as fin:
-            models_txt.append(fin.readlines())
-
-    framework.status = 'SUCCESS'
-    framework.fold_leaderboard = leaderboard
-    framework.fold_model_txt = models_txt
-
-    db.session.add(framework)
-    db.session.commit()
-    remove_files(outdir)
+    except:
+        framework.status = 'FAIL'
+        if framework.info is None:
+            framework.info = 'Error processing results.'
+        else:
+            framework.info += ', error processing results'
+        db.session.add(framework)
+        db.session.commit()
+        remove_files(outdir)
+        raise
 
 
 @shared_task(name='tasks.runbenchmark_on_failure')

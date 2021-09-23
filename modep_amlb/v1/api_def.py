@@ -113,12 +113,13 @@ class TabularFrameworkTrain(MethodResource, Resource):
         user_pk = user.pk
         n_folds = len(kwargs['train_ids'])
 
-        framework_name = kwargs['framework_name'].lower()
+        framework_name = kwargs['framework_name']
         # framework_id is the lower cased framework name
-        framework_svc = TabularFrameworkService.query.filter_by(framework_id=framework_name)
+        framework_svc = TabularFrameworkService.query.filter_by(framework_id=framework_name.lower())
         count = framework_svc.count()
         if count == 0:
-            names = [x.framework_name for x in TabularFrameworkService.query.filter_by(framework_name=framework_name).all()]
+            names = [x.framework_name for x in TabularFrameworkService.query.all()]
+            logger.info(names)
             names = ', '.join(names)
             abort(404, message=f"Unknown framework name: {framework_name}, should be one of: {names}")
         elif count > 1:
@@ -129,6 +130,7 @@ class TabularFrameworkTrain(MethodResource, Resource):
         kwargs['user_pk'] = user_pk
         kwargs['n_folds'] = n_folds
         kwargs['framework_name'] = framework_name
+        kwargs['framework_pk'] = framework_svc.pk
 
         framework = TabularFramework(**kwargs)
         framework.status = 'RUNNING'
@@ -167,16 +169,21 @@ class TabularFrameworkTrain(MethodResource, Resource):
             sc.download(dset.gcp_path, dest_path)
             test.append(dest_path)
 
-        train, test = yaml_path_string(train), yaml_path_string(test)
-
-        config = config_template.format(outdir=outdir)
-        benchmark = benchmark_template.format(train=train, test=test, target=kwargs['target'],
-                                              n_folds=n_folds,
-                                              max_runtime_seconds=kwargs['max_runtime_seconds'],
-                                              task_type='train', # default task
-                                              model_path='', # no existing model
-                                              )
-        constraint = constraint_template.format(max_runtime_seconds=kwargs['max_runtime_seconds'])
+        config = config_template.format(
+            outdir=outdir,
+        )
+        benchmark = benchmark_template.format(
+            train=yaml_path_string(train),
+            test=yaml_path_string(test),
+            target=kwargs['target'],
+            n_folds=n_folds,
+            max_runtime_seconds=kwargs['max_runtime_seconds'],
+            task_type='train', # default task
+            model_path='', # no existing model
+        )
+        constraint = constraint_template.format(
+            max_runtime_seconds=kwargs['max_runtime_seconds'],
+        )
 
         # write all yaml files
         write_string(config, 'config.yaml', outdir)
@@ -263,24 +270,38 @@ class TabularFrameworkPredict(MethodResource, Resource):
         db.session.commit()
         preds_pk = preds.pk
 
-        train, test = yaml_path_string(train), yaml_path_string(test)
-
         # download the model
         model_path = os.path.join(outdir, 'input-data', 'saved-model.zip')
-        sc.download(framework.gcp_model_paths[model_fold], model_path)
+        gcp_model_path = framework.gcp_model_paths[model_fold]
+        if gcp_model_path is None:
+            # case when model saving failed
+            # TODO: catch this earlier
+            preds.status = 'FAIL'
+            db.session.add(preds)
+            db.session.commit()
+            return preds
+
+        sc.download(gcp_model_path, model_path)
         # extract to path without zip in it
         shutil.unpack_archive(model_path, model_path.replace('.zip', ''), 'zip')
         # remove extension so that path points to extracted zip contents
         model_path = model_path.replace('.zip', '')
 
-        config = config_template.format(outdir=outdir)
-        benchmark = benchmark_template.format(train=train, test=test, target=framework.target,
-                                              n_folds=1,
-                                              max_runtime_seconds=max_runtime_seconds,
-                                              task_type='predict', # default task
-                                              model_path=model_path,
-                                              )
-        constraint = constraint_template.format(max_runtime_seconds=max_runtime_seconds)
+        config = config_template.format(
+            outdir=outdir,
+        )
+        benchmark = benchmark_template.format(
+            train=yaml_path_string(train),
+            test=yaml_path_string(test),
+            target=framework.target,
+            n_folds=1,
+            max_runtime_seconds=max_runtime_seconds,
+            task_type='predict',
+            model_path=model_path,
+        )
+        constraint = constraint_template.format(
+            max_runtime_seconds=max_runtime_seconds,
+        )
 
         # write all yaml files
         write_string(config, 'config.yaml', outdir)
