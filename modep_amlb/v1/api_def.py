@@ -271,18 +271,26 @@ class TabularFrameworkPredict(MethodResource, Resource):
         preds_pk = preds.pk
 
         # download the model
-        model_path = os.path.join(outdir, 'input-data', 'saved-model.zip')
-        gcp_model_path = framework.gcp_model_paths[model_fold]
-        if gcp_model_path is None:
-            # case when model saving failed
+        if len(framework.gcp_model_paths) == 0:
+            # case when exec.py didn't return a model_path to save
             # TODO: catch this earlier
             preds.status = 'FAIL'
             db.session.add(preds)
             db.session.commit()
             return preds
 
+        gcp_model_path = framework.gcp_model_paths[model_fold]
+        if gcp_model_path is None:
+            # case when model saving failed in exec.py
+            # TODO: catch this earlier
+            preds.status = 'FAIL'
+            db.session.add(preds)
+            db.session.commit()
+            return preds
+
+        model_path = os.path.join(outdir, 'input-data', 'saved-model.zip')
         sc.download(gcp_model_path, model_path)
-        # extract to path without zip in it
+        # extract to same path without '.zip' in it
         shutil.unpack_archive(model_path, model_path.replace('.zip', ''), 'zip')
         # remove extension so that path points to extracted zip contents
         model_path = model_path.replace('.zip', '')

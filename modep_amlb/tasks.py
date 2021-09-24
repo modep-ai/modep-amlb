@@ -163,7 +163,7 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
                     continue
                 if model_path[-1] == '/':
                     model_path = model_path[:-1]
-                gcp_path = f"tabular-frameworks/{user.id}/{framework.id}/models/{fold}.zip"
+                gcp_path = f"tabular-frameworks/{framework.id}/models/{fold}.zip"
                 zip_and_upload(model_path, gcp_path)
                 gcp_model_paths.append(gcp_path)
                 remove_files(model_path)
@@ -232,7 +232,7 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
 
             # upload the predictions
             _, ext = os.path.splitext(local_path)
-            gcp_path = f"tabular-framework-preds/{framework_preds.id}/predictions{ext}"
+            gcp_path = f"tabular-framework-predictions/{framework_preds.id}/predictions{ext}"
             sc.upload(local_path, gcp_path)
 
             framework_preds.gcp_path = gcp_path
@@ -286,14 +286,13 @@ def runbenchmark_on_failure(err_request, err_message, err_traceback, framework_p
 
     # get database entries for the run and user
     framework = TabularFramework.query.filter_by(pk=framework_pk).one()
-    user = User.query.filter_by(pk=framework.user_pk).one()
 
-    gcp_path = f"tabular-frameworks/{user.id}/{framework.id}.zip"
-    zip_and_upload(outdir, gcp_path)
+    # gcp_path = f"tabular-frameworks/{framework.id}.zip"
+    # zip_and_upload(outdir, gcp_path)
 
     remove_files(outdir)
 
-    framework.gcp_path = gcp_path
+    # framework.gcp_path = gcp_path
     framework.status = 'FAIL'
     db.session.add(framework)
     db.session.commit()
@@ -333,7 +332,7 @@ def runbenchmark_predict_on_success(prev_result, outdir, preds_pk):
 
     # upload the predictions
     _, ext = os.path.splitext(local_path)
-    gcp_path = f"tabular-framework-preds/{preds.id}/predictions{ext}"
+    gcp_path = f"tabular-framework-predictions/{preds.id}/predictions{ext}"
     sc = StorageClient()
     sc.upload(local_path, gcp_path)
 
