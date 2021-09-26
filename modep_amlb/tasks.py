@@ -20,9 +20,11 @@ from modep_common.io import StorageClient
 
 logger = logging.getLogger(__name__)
 
+MODEP_FILE_CLEANUP = os.environ.get('MODEP_FILE_CLEANUP', False)
+
 
 def run_cmd(cmd):
-    """ Run a shell command and print the output as it runs. """
+    """ Run a shell command and print the output as it runs """
     logger.debug('$ %s', cmd)
     process = subprocess.Popen(cmd,
                                stdout=subprocess.PIPE,
@@ -43,22 +45,14 @@ def run_cmd(cmd):
     return return_code
 
 
-def is_local():
-    """ Returns true if running locally """
-    if os.path.exists('/bench/venv/bin'):
-        # running in docker container
-        return False
-    else:
-        # running locally
-        return True
-
-
 def get_runbenchmark_cmd():
     """ Returns the path to the python command """
-    if is_local():
-        return 'python -W ignore /home/jimmie/git/mlapi/automlbenchmark/runbenchmark.py'
-    else:
+    if os.path.exists('/bench/venv/bin'):
+        # when running in docker container
         return '/bench/venv/bin/python3 -W ignore /bench/automlbenchmark/runbenchmark.py'
+    else:
+        # when running locally
+        return 'python -W ignore /home/jimmie/git/mlapi/automlbenchmark/runbenchmark.py'
 
 
 def zip_and_upload(outdir, gcp_path):
@@ -77,10 +71,6 @@ def zip_and_upload(outdir, gcp_path):
 
 def remove_files(outdir):
     """ Remove the files after zip_and_upload """
-    if is_local():
-        # skip this if running locally so that debugging is easier
-        return
-
     if os.path.exists(outdir):
         logger.info("Deleting outdir to save space: %s", outdir)
         shutil.rmtree(outdir)
@@ -96,8 +86,6 @@ def runbenchmark(self, framework_pk, framework_name, dataset_id, constraint_id, 
     """
     Calls the `runbenchmark.py` script.
     """
-    logger.info('self.request: %s', str(vars(self.request)))
-
     # Add the celery task ID to the DB
     framework = TabularFramework.query.filter_by(pk=framework_pk).one()
     framework.task_id = self.request.id
@@ -120,14 +108,18 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
     """
 
     try:
-
         framework = TabularFramework.query.filter_by(pk=framework_pk).one()
-        user = User.query.filter_by(pk=framework.user_pk).one()
+        # user = User.query.filter_by(pk=framework.user_pk).one()
+
+        # upload entire output folder, removes input-data subdir with downloaded models in it
+        gcp_path = f"tabular-frameworks/{framework.id}.zip"
+        zip_and_upload(outdir, gcp_path)
+        framework.gcp_path = gcp_path
 
         #-----------------------------------------------------
         # metadata.json (one file per fold)
 
-        fs = sorted(glob.glob(outdir + '/*/predictions/files/*/metadata.json'))
+        fs = sorted(glob.glob(outdir + '/*/predictions/modep/*/metadata.json'))
         metadatas = []
         for i, f in enumerate(fs):
             with open(f, 'r') as fin:
@@ -166,7 +158,8 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
                 gcp_path = f"tabular-frameworks/{framework.id}/models/{fold}.zip"
                 zip_and_upload(model_path, gcp_path)
                 gcp_model_paths.append(gcp_path)
-                remove_files(model_path)
+                if MODEP_FILE_CLEANUP:
+                    remove_files(model_path)
         else:
             logger.debug('Not uploading any models')
         framework.gcp_model_paths = gcp_model_paths
@@ -210,13 +203,15 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
         # TODO: will these be ordered for n_folds >= 10?
         # - first wildcard is like `randomforest.benchmark.constraint.local.20210611T190804`
         # - second wildcard is over folds (0, 1, ...)
-        fs = sorted(glob.glob(outdir + '/*/predictions/files/*/predictions.csv'))
+        fs = sorted(glob.glob(outdir + '/*/predictions/modep/*/predictions.csv'))
 
         if len(fs) == 0:
             framework.status = 'FAIL'
+            framework.info += ', no predictions'
             db.session.add(framework)
             db.session.commit()
-            remove_files(outdir)
+            if MODEP_FILE_CLEANUP:
+                remove_files(outdir)
             return
 
         # should be same length as `preds`
@@ -243,16 +238,16 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
         # model related (leaderboard.csv, models.txt)
 
         if 'h2o' in framework.framework_name.lower():
-            fs = glob.glob(outdir + '/*/models/files/*/leaderboard.csv')
+            fs = glob.glob(outdir + '/*/models/modep/*/leaderboard.csv')
         else:
             # AutoGluon case
-            fs = glob.glob(outdir + '/*/leaderboard/files/*/leaderboard.csv')
+            fs = glob.glob(outdir + '/*/leaderboard/modep/*/leaderboard.csv')
 
         leaderboard = [pd.read_csv(f) for f in fs]
         leaderboard = [df.where(pd.notnull(df), None) for df in leaderboard]
         leaderboard = [df.to_dict('records') for df in leaderboard]
 
-        fs = glob.glob(outdir + '/*/models/files/*/models.txt')
+        fs = glob.glob(outdir + '/*/models/modep/*/models.txt')
         models_txt = []
         for f in fs:
             with open(f, 'r') as fin:
@@ -264,16 +259,15 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
 
         db.session.add(framework)
         db.session.commit()
-        remove_files(outdir)
-    except:
+
+    except Exception as e:
         framework.status = 'FAIL'
-        if framework.info is None:
-            framework.info = 'Error processing results.'
-        else:
-            framework.info += ', error processing results'
+        framework.info += ', error processing results'
         db.session.add(framework)
         db.session.commit()
-        remove_files(outdir)
+        if MODEP_FILE_CLEANUP:
+            remove_files(outdir)
+        logger.exception(e)
         raise
 
 
@@ -287,13 +281,16 @@ def runbenchmark_on_failure(err_request, err_message, err_traceback, framework_p
     # get database entries for the run and user
     framework = TabularFramework.query.filter_by(pk=framework_pk).one()
 
-    # gcp_path = f"tabular-frameworks/{framework.id}.zip"
-    # zip_and_upload(outdir, gcp_path)
+    # upload entire output folder
+    gcp_path = f"tabular-frameworks/{framework.id}.zip"
+    zip_and_upload(outdir, gcp_path)
+    if MODEP_FILE_CLEANUP:
+        remove_files(outdir)
+    framework.gcp_path = gcp_path
 
-    remove_files(outdir)
-
-    # framework.gcp_path = gcp_path
+    # mark as failed
     framework.status = 'FAIL'
+    framework.info += ', on_failure'
     db.session.add(framework)
     db.session.commit()
 
@@ -303,8 +300,6 @@ def runbenchmark_predict(self, framework_pk, framework_name, dataset_id, constra
     """
     Calls the `runbenchmark.py` script. Use bind=True so that `self.request` is available.
     """
-    logger.info('self.request: %s', str(vars(self.request)))
-
     runbenchmark_cmd = get_runbenchmark_cmd()
     cmd = f"{runbenchmark_cmd} {framework_name} {dataset_id} {constraint_id} -o {outdir} -u {user_dir} --logging debug"
     exit_code = run_cmd(cmd)
@@ -318,13 +313,14 @@ def runbenchmark_predict_on_success(prev_result, outdir, preds_pk):
 
     preds = TabularFrameworkPredictions.query.filter_by(pk=preds_pk).one()
 
-    fs = sorted(glob.glob(outdir + '/*/predictions/files/*/predictions.csv'))
+    fs = sorted(glob.glob(outdir + '/*/predictions/modep/*/predictions.csv'))
 
     if len(fs) == 0:
         preds.status = 'FAIL'
         db.session.add(preds)
         db.session.commit()
-        remove_files(outdir)
+        if MODEP_FILE_CLEANUP:
+            remove_files(outdir)
         return
 
     # only one fold supported

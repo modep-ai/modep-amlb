@@ -57,7 +57,7 @@ benchmarks:
 """
 
 benchmark_template = """---
-- name: files
+- name: modep
   dataset:
     train:
 {train}
@@ -71,7 +71,7 @@ benchmark_template = """---
 
 constraint_template = """---
 constraint:
-  cores: 8
+  cores: {cores}
   max_runtime_seconds: {max_runtime_seconds}
 """
 
@@ -113,6 +113,9 @@ class TabularFrameworkTrain(MethodResource, Resource):
         user_pk = user.pk
         n_folds = len(kwargs['train_ids'])
 
+        max_runtime_seconds = kwargs['max_runtime_seconds']
+        cores = kwargs.pop('cores', 1)
+
         framework_name = kwargs['framework_name']
         # framework_id is the lower cased framework name
         framework_svc = TabularFrameworkService.query.filter_by(framework_id=framework_name.lower())
@@ -145,6 +148,7 @@ class TabularFrameworkTrain(MethodResource, Resource):
         # Fetch this here and use it instead of framework.pk due to DB session
         # timeout in SQLAlchemy when lazily getting object properties.
         framework_pk = framework.pk
+        framework_id = framework.id
 
         if os.path.exists(outdir):
             shutil.rmtree(outdir)
@@ -177,12 +181,12 @@ class TabularFrameworkTrain(MethodResource, Resource):
             test=yaml_path_string(test),
             target=kwargs['target'],
             n_folds=n_folds,
-            max_runtime_seconds=kwargs['max_runtime_seconds'],
             task_type='train', # default task
             model_path='', # no existing model
         )
         constraint = constraint_template.format(
-            max_runtime_seconds=kwargs['max_runtime_seconds'],
+            max_runtime_seconds=max_runtime_seconds,
+            cores=cores,
         )
 
         # write all yaml files
@@ -229,12 +233,14 @@ class TabularFrameworkPredict(MethodResource, Resource):
         # timeout in SQLAlchemy when lazily getting object properties.
         framework_pk = framework.pk
         framework_name = framework.framework_name
+        framework_id = framework.id
 
         # TODO: default to the fold used in training for this dataset
         model_fold = 0
 
         # TODO: set to users maximum allowed training time
-        max_runtime_seconds = 3600 # kwargs['max_runtime_seconds']
+        max_runtime_seconds = kwargs.get('max_runtime_seconds', 3600)
+        cores = kwargs.get('cores', 1)
 
         outdir = tempfile.NamedTemporaryFile().name
         logger.info('Saving output to %s', outdir)
@@ -303,12 +309,12 @@ class TabularFrameworkPredict(MethodResource, Resource):
             test=yaml_path_string(test),
             target=framework.target,
             n_folds=1,
-            max_runtime_seconds=max_runtime_seconds,
             task_type='predict',
             model_path=model_path,
         )
         constraint = constraint_template.format(
             max_runtime_seconds=max_runtime_seconds,
+            cores=cores,
         )
 
         # write all yaml files
