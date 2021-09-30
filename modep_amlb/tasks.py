@@ -17,6 +17,7 @@ from modep_common.models import (
     TabularFrameworkPredictions,
 )
 from modep_common.io import StorageClient
+from modep_common.enums import JobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -81,36 +82,10 @@ def remove_files(outdir):
         os.remove(zip_file)
 
 
-@shared_task(name='tasks.runbenchmark', bind=True)
-def runbenchmark(self, framework_pk, framework_name, dataset_id, constraint_id, outdir, user_dir):
-    """
-    Calls the `runbenchmark.py` script.
-    """
-    # Add the celery task ID to the DB
+def on_success_train(framework_pk, outdir):
     framework = TabularFramework.query.filter_by(pk=framework_pk).one()
-    framework.task_id = self.request.id
-    db.session.add(framework)
-    db.session.commit()
-
-    runbenchmark_cmd = get_runbenchmark_cmd()
-    cmd = f"{runbenchmark_cmd} {framework_name} {dataset_id} {constraint_id} -o {outdir} -u {user_dir} --logging debug"
-    exit_code = run_cmd(cmd)
-    if exit_code != 0:
-        raise Exception(f"Command exited with non-zero exit status: {exit_code}")
-    return exit_code
-
-
-@shared_task(name='tasks.runbenchmark_on_success')
-def runbenchmark_on_success(prev_result, framework_pk, outdir):
-    """
-    Called when `runbenchmark` runs successfullly.
-    prev_result is not used (required to be passed b/c of the task linkage with `runbenchmark`)
-    """
 
     try:
-        framework = TabularFramework.query.filter_by(pk=framework_pk).one()
-        # user = User.query.filter_by(pk=framework.user_pk).one()
-
         # upload entire output folder, removes input-data subdir with downloaded models in it
         gcp_path = f"tabular-frameworks/{framework.id}.zip"
         zip_and_upload(outdir, gcp_path)
@@ -127,6 +102,15 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
             metadatas.append(metadata)
 
         framework.fold_meta = metadatas
+
+        if len(metadatas) == 0:
+            framework.status = JobStatus.FAIL.name
+            framework.info = 'no model metadata'
+            db.session.add(framework)
+            db.session.commit()
+            if MODEP_FILE_CLEANUP:
+                remove_files(outdir)
+            return
 
         # get the names of any metric columns in the results DataFrame below (same for all folds)
         metric_cols = metadatas[0]['metrics']
@@ -206,7 +190,7 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
         fs = sorted(glob.glob(outdir + '/*/predictions/modep/*/predictions.csv'))
 
         if len(fs) == 0:
-            framework.status = 'FAIL'
+            framework.status = JobStatus.FAIL.name
             framework.info += ', no predictions'
             db.session.add(framework)
             db.session.commit()
@@ -231,7 +215,7 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
             sc.upload(local_path, gcp_path)
 
             framework_preds.gcp_path = gcp_path
-            framework_preds.status = 'SUCCESS'
+            framework_preds.status = JobStatus.SUCCESS.name
             db.session.add(framework_preds)
 
         #-----------------------------------------------------
@@ -253,7 +237,7 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
             with open(f, 'r') as fin:
                 models_txt.append(fin.readlines())
 
-        framework.status = 'SUCCESS'
+        framework.status = JobStatus.SUCCESS.name
         framework.fold_leaderboard = leaderboard
         framework.fold_model_txt = models_txt
 
@@ -261,7 +245,7 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
         db.session.commit()
 
     except Exception as e:
-        framework.status = 'FAIL'
+        framework.status = JobStatus.FAIL.name
         framework.info += ', error processing results'
         db.session.add(framework)
         db.session.commit()
@@ -271,28 +255,112 @@ def runbenchmark_on_success(prev_result, framework_pk, outdir):
         raise
 
 
+def on_failure_train(framework_pk, outdir=None, info=None):
+    # get database entries for the run and user
+    framework = TabularFramework.query.filter_by(pk=framework_pk).one()
+
+    if outdir is not None:
+        # upload entire output folder
+        framework.gcp_path = f"tabular-frameworks/{framework.id}.zip"
+        zip_and_upload(outdir, framework.gcp_path)
+        if MODEP_FILE_CLEANUP:
+            remove_files(outdir)
+
+    # mark as failed
+    framework.status = JobStatus.FAIL.name
+    if info is not None:
+        framework.info = info
+    else:
+        framework.info += ', failure in training'
+    db.session.add(framework)
+    db.session.commit()
+
+
+def on_success_predict(preds_pk, outdir):
+    preds = TabularFrameworkPredictions.query.filter_by(pk=preds_pk).one()
+
+    fs = sorted(glob.glob(outdir + '/*/predictions/modep/*/predictions.csv'))
+
+    if len(fs) == 0:
+        preds.status = JobStatus.FAIL.name
+        preds.info = 'No predictions were created by the model'
+        db.session.add(preds)
+        db.session.commit()
+        if MODEP_FILE_CLEANUP:
+            remove_files(outdir)
+        return
+    elif len(fs) > 1:
+        preds.status = JobStatus.FAIL.name
+        preds.info = 'Multiple sets of predictions were created by the model'
+        db.session.add(preds)
+        db.session.commit()
+        if MODEP_FILE_CLEANUP:
+            remove_files(outdir)
+        return
+
+    # predict only works with one dataset, so there's only one predictions file
+    local_path = fs[0]
+
+    # upload the predictions
+    _, ext = os.path.splitext(local_path)
+    gcp_path = f"tabular-framework-predictions/{preds.id}/predictions{ext}"
+    sc = StorageClient()
+    sc.upload(local_path, gcp_path)
+
+    # add predictions to DB
+    preds.path = local_path
+    preds.gcp_path = gcp_path
+    preds.status = JobStatus.SUCCESS.name
+    db.session.add(preds)
+    db.session.commit()
+
+
+def on_failure_predict(preds_pk, outdir=None, info=None):
+    preds = TabularFrameworkPredictions.query.filter_by(pk=preds_pk).one()
+    preds.status = JobStatus.FAIL.name
+    if info is not None:
+        preds.info = info
+    else:
+        preds.info = 'failure getting predictions'
+    db.session.add(preds)
+    db.session.commit()
+
+    
+@shared_task(name='tasks.runbenchmark', bind=True)
+def runbenchmark(self, framework_pk, framework_name, dataset_id, constraint_id, outdir, user_dir):
+    """
+    Calls the `runbenchmark.py` script.
+    """
+    # Add the celery task ID to the DB
+    framework = TabularFramework.query.filter_by(pk=framework_pk).one()
+    framework.task_id = self.request.id
+    db.session.add(framework)
+    db.session.commit()
+
+    runbenchmark_cmd = get_runbenchmark_cmd()
+    cmd = f"{runbenchmark_cmd} {framework_name} {dataset_id} {constraint_id} -o {outdir} -u {user_dir} --logging debug"
+    exit_code = run_cmd(cmd)
+    if exit_code != 0:
+        raise Exception(f"Command exited with non-zero exit status: {exit_code}")
+    return exit_code
+
+
+@shared_task(name='tasks.runbenchmark_on_success')
+def runbenchmark_on_success(prev_result, framework_pk, outdir):
+    """
+    Called when `runbenchmark` runs successfullly.
+    prev_result is not used (required to be passed b/c of the task linkage with `runbenchmark`)
+    """
+    on_success_train(framework_pk, outdir)
+
+
 @shared_task(name='tasks.runbenchmark_on_failure')
 def runbenchmark_on_failure(err_request, err_message, err_traceback, framework_pk, outdir):
     """
     Called when `runbenchmark` fails.
     first three args are required by celery
     """
-
-    # get database entries for the run and user
-    framework = TabularFramework.query.filter_by(pk=framework_pk).one()
-
-    # upload entire output folder
-    gcp_path = f"tabular-frameworks/{framework.id}.zip"
-    zip_and_upload(outdir, gcp_path)
-    if MODEP_FILE_CLEANUP:
-        remove_files(outdir)
-    framework.gcp_path = gcp_path
-
-    # mark as failed
-    framework.status = 'FAIL'
-    framework.info += ', on_failure'
-    db.session.add(framework)
-    db.session.commit()
+    on_failure_train(framework_pk, outdir)
 
 
 @shared_task(name='tasks.runbenchmark_predict', bind=True)
@@ -309,43 +377,10 @@ def runbenchmark_predict(self, framework_pk, framework_name, dataset_id, constra
 
 
 @shared_task(name='tasks.runbenchmark_predict_on_success')
-def runbenchmark_predict_on_success(prev_result, outdir, preds_pk):
-
-    preds = TabularFrameworkPredictions.query.filter_by(pk=preds_pk).one()
-
-    fs = sorted(glob.glob(outdir + '/*/predictions/modep/*/predictions.csv'))
-
-    if len(fs) == 0:
-        preds.status = 'FAIL'
-        db.session.add(preds)
-        db.session.commit()
-        if MODEP_FILE_CLEANUP:
-            remove_files(outdir)
-        return
-
-    # only one fold supported
-    local_path = fs[0]
-
-    # upload the predictions
-    _, ext = os.path.splitext(local_path)
-    gcp_path = f"tabular-framework-predictions/{preds.id}/predictions{ext}"
-    sc = StorageClient()
-    sc.upload(local_path, gcp_path)
-
-    # add predictions to DB
-    preds.path = local_path
-    preds.gcp_path = gcp_path
-    preds.status = 'SUCCESS'
-    db.session.add(preds)
-    db.session.commit()
+def runbenchmark_predict_on_success(prev_result, preds_pk, outdir):
+    on_success_predict(preds_pk, outdir)
 
 
 @shared_task(name='tasks.runbenchmark_predict_on_failure')
-def runbenchmark_predict_on_failure(err_request, err_message, err_traceback, preds_pk):
-    """
-    first three args are required by celery
-    """
-    preds = TabularFrameworkPredictions.query.filter_by(pk=preds_pk).one()
-    preds.status = 'FAIL'
-    db.session.add(preds)
-    db.session.commit()
+def runbenchmark_predict_on_failure(err_request, err_message, err_traceback, preds_pk, outdir):
+    on_failure_predict(preds_pk, outdir)

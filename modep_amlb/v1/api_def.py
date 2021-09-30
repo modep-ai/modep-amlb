@@ -34,6 +34,7 @@ from modep_common.schemas import (
 )
 
 from modep_common.io import StorageClient
+from modep_common.enums import JobStatus
 
 from modep_amlb import tasks
 
@@ -101,6 +102,83 @@ def write_string(string, name, outdir):
         f.write(string)
 
 
+def setup_train(outdir, train_ids, test_ids, target, max_runtime_seconds, cores, task_type='train', model_path=''):
+
+    # framework = TabularFramework.query.filter_by(pk=framework_pk).one()
+
+    if outdir is None:
+        outdir = tempfile.NamedTemporaryFile().name    
+
+    for d in ['input-data/train', 'input-data/test', 'benchmarks']:
+        os.makedirs(os.path.join(outdir, d), exist_ok=True)
+
+    sc = StorageClient()
+
+    train = []
+    for i, id in enumerate(train_ids):
+        dset = tabular_dataset_by_id(id)
+        dest_path = os.path.join(outdir, 'input-data', 'train', f'{dset.id}_{i}.{dset.ext}')
+        sc.download(dset.gcp_path, dest_path)
+        train.append(dest_path)
+
+    test = []
+    for i, id in enumerate(test_ids):
+        dset = tabular_dataset_by_id(id)
+        dest_path = os.path.join(outdir, 'input-data', 'test', f'{dset.id}_{i}.{dset.ext}')
+        sc.download(dset.gcp_path, dest_path)
+        test.append(dest_path)
+
+    config = config_template.format(
+        outdir=outdir,
+    )
+    benchmark = benchmark_template.format(
+        train=yaml_path_string(train),
+        test=yaml_path_string(test),
+        target=target,
+        n_folds=len(train_ids),
+        task_type=task_type,
+        model_path=model_path,
+    )
+    constraint = constraint_template.format(
+        max_runtime_seconds=max_runtime_seconds,
+        cores=cores,
+    )
+
+    # write all yaml files
+    write_string(config, 'config.yaml', outdir)
+    write_string(benchmark, 'benchmarks/benchmark.yaml', outdir)
+    write_string(constraint, 'constraints.yaml', outdir)
+
+    logger.info(config)
+    logger.info(benchmark)
+    logger.info(constraint)
+
+    return outdir
+
+
+def setup_predict(gcp_model_path, outdir, train_ids, test_ids, target, max_runtime_seconds, cores):
+    if outdir is None:
+        outdir = tempfile.NamedTemporaryFile().name
+
+    # create this to save model into
+    os.makedirs(os.path.join(outdir, 'input-data'), exist_ok=True)
+    model_path = os.path.join(outdir, 'input-data', 'saved-model.zip')
+
+    # download the model
+    sc = StorageClient()
+    sc.download(gcp_model_path, model_path)
+    # extract to same path without '.zip' in it
+    shutil.unpack_archive(model_path, model_path.replace('.zip', ''), 'zip')
+    # remove extension so that path points to extracted zip contents
+    model_path = model_path.replace('.zip', '')
+
+    # pass predict task_type and local model_path
+    setup_train(outdir, train_ids, test_ids, target, max_runtime_seconds, cores,
+                task_type='predict', model_path=model_path)
+
+    return outdir
+   
+
 class TabularFrameworkTrain(MethodResource, Resource):
 
     @doc(description='Run a framework', tags=[TAG])
@@ -136,7 +214,7 @@ class TabularFrameworkTrain(MethodResource, Resource):
         kwargs['framework_pk'] = framework_svc.pk
 
         framework = TabularFramework(**kwargs)
-        framework.status = 'RUNNING'
+        framework.status = JobStatus.RUNNING.name
 
         outdir = tempfile.NamedTemporaryFile().name
         framework.outdir = outdir
@@ -148,55 +226,9 @@ class TabularFrameworkTrain(MethodResource, Resource):
         # Fetch this here and use it instead of framework.pk due to DB session
         # timeout in SQLAlchemy when lazily getting object properties.
         framework_pk = framework.pk
-        framework_id = framework.id
 
-        if os.path.exists(outdir):
-            shutil.rmtree(outdir)
-        os.makedirs(outdir, exist_ok=True)
-
-        for d in ['input-data/train', 'input-data/test', 'benchmarks']:
-            os.makedirs(os.path.join(outdir, d), exist_ok=True)
-
-        sc = StorageClient()
-
-        train = []
-        for i, id in enumerate(kwargs['train_ids']):
-            dset = tabular_dataset_by_id(id)
-            dest_path = os.path.join(outdir, 'input-data', 'train', f'{dset.id}_{i}.{dset.ext}')
-            sc.download(dset.gcp_path, dest_path)
-            train.append(dest_path)
-
-        test = []
-        for i, id in enumerate(kwargs['test_ids']):
-            dset = tabular_dataset_by_id(id)
-            dest_path = os.path.join(outdir, 'input-data', 'test', f'{dset.id}_{i}.{dset.ext}')
-            sc.download(dset.gcp_path, dest_path)
-            test.append(dest_path)
-
-        config = config_template.format(
-            outdir=outdir,
-        )
-        benchmark = benchmark_template.format(
-            train=yaml_path_string(train),
-            test=yaml_path_string(test),
-            target=kwargs['target'],
-            n_folds=n_folds,
-            task_type='train', # default task
-            model_path='', # no existing model
-        )
-        constraint = constraint_template.format(
-            max_runtime_seconds=max_runtime_seconds,
-            cores=cores,
-        )
-
-        # write all yaml files
-        write_string(config, 'config.yaml', outdir)
-        write_string(benchmark, 'benchmarks/benchmark.yaml', outdir)
-        write_string(constraint, 'constraints.yaml', outdir)
-
-        logger.info(config)
-        logger.info(benchmark)
-        logger.info(constraint)
+        setup_train(outdir, kwargs['train_ids'], kwargs['test_ids'],
+                    kwargs['target'], max_runtime_seconds, cores)
 
         # link gets run if first task is successful
         # link_error gets run if first task fails
@@ -233,7 +265,6 @@ class TabularFrameworkPredict(MethodResource, Resource):
         # timeout in SQLAlchemy when lazily getting object properties.
         framework_pk = framework.pk
         framework_name = framework.framework_name
-        framework_id = framework.id
 
         # TODO: default to the fold used in training for this dataset
         model_fold = 0
@@ -269,18 +300,17 @@ class TabularFrameworkPredict(MethodResource, Resource):
         test = [dest_path]
 
         preds = TabularFrameworkPredictions(framework_pk, dset.pk, model_fold)
-        preds.status = 'RUNNING'
+        preds.status = JobStatus.RUNNING.name
         db.session.add(preds)
 
         # to get pred_pk
         db.session.commit()
         preds_pk = preds.pk
 
-        # download the model
         if len(framework.gcp_model_paths) == 0:
             # case when exec.py didn't return a model_path to save
             # TODO: catch this earlier
-            preds.status = 'FAIL'
+            preds.status = JobStatus.FAIL.name
             db.session.add(preds)
             db.session.commit()
             return preds
@@ -289,11 +319,12 @@ class TabularFrameworkPredict(MethodResource, Resource):
         if gcp_model_path is None:
             # case when model saving failed in exec.py
             # TODO: catch this earlier
-            preds.status = 'FAIL'
+            preds.status = JobStatus.FAIL.name
             db.session.add(preds)
             db.session.commit()
             return preds
 
+        # download the model        
         model_path = os.path.join(outdir, 'input-data', 'saved-model.zip')
         sc.download(gcp_model_path, model_path)
         # extract to same path without '.zip' in it
@@ -329,8 +360,8 @@ class TabularFrameworkPredict(MethodResource, Resource):
         result = current_app.celery.send_task(
             'tasks.runbenchmark_predict',
             args=(framework_pk, framework_name, 'benchmark', 'constraint', outdir, outdir),
-            link=[celery.signature('tasks.runbenchmark_predict_on_success', args=(outdir, preds_pk,))],
-            link_error=[celery.signature('tasks.runbenchmark_predict_on_failure', args=(preds_pk,))],
+            link=[celery.signature('tasks.runbenchmark_predict_on_success', args=(preds_pk, outdir))],
+            link_error=[celery.signature('tasks.runbenchmark_predict_on_failure', args=(preds_pk, outdir))],
         )
         logger.info('celery send_task result: %s', str(result))
 
@@ -357,7 +388,7 @@ docs.register(TabularFrameworkPredict, blueprint=BLUEPRINT)
 #         sc = StorageClient()
 
 #         for framework in frameworks:
-#             # if framework.status != 'SUCCESS':
+#             # if framework.status != JobStatus.SUCCESS.name:
 #             #     continue
 
 #             if os.path.exists(framework.outdir):

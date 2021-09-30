@@ -1,20 +1,12 @@
-import argparse
 import logging
+import argparse
 import flask
 import tornado.wsgi
 import tornado.httpserver
 
 from modep_common.models import AnonUser
-from modep_common import settings
 
 from modep_amlb import app
-
-
-def print_objs():
-    """ Test DB connection by printing some objects """
-    with app.app_context():
-        print("AnonUser")
-        print(AnonUser.query.all())
 
 
 # @celery.task()
@@ -42,18 +34,15 @@ if __name__ == '__main__':
 
     logging.getLogger().setLevel(logging.DEBUG)
 
-    print_objs()
+    # test the DB connection
+    with app.app_context():
+        print(AnonUser.query.all())
 
     # from flask import current_app
-
     # with app.app_context():
     #     print('Trying to add')
     #     result = add_together.delay(23, 42)  # 65
     #     print('Add result', result.wait())
-
-    # with app.app_context():
-    #     result = current_app.celery.send_task('tasks.update_framework', args=('c9afa411-6db2-448c-b74d-b4b3502f5b7d', '/tmp/tmp_ty5a3sl'))
-    #     print(result.get())
 
     if args.debug == 0:
         start_tornado(app, args.port)

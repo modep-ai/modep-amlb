@@ -1,22 +1,22 @@
-import logging
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    level=logging.DEBUG,
-)
-
 import os
+import logging
 import datetime
 import secrets
 from flask import Flask
 import flask_login
-from flask_sqlalchemy import SQLAlchemy
+# from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager
 
 from modep_common.models import db
 from modep_common import settings
 
 from modep_amlb.v1.api_def import blueprint as blueprint_v1, docs as docs_v1
+
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    level=logging.DEBUG,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -37,8 +37,7 @@ app.register_blueprint(blueprint_v1, url_prefix="/v1")
 ## Next line commented out due to error inside marshmallow (we don't need docs for this service anyway)
 # docs_v1.init_app(app)
 
-# db = SQLAlchemy(app)
-
+## Initialize SQLAlchemy DB
 db.init_app(app)
 
 ## don't need migrations b/c they're handled by flask_app

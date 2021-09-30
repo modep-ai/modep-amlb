@@ -1,28 +1,18 @@
 FROM ubuntu:18.04
 
 WORKDIR /bench
-
 ENV DEBIAN_FRONTEND noninteractive
-
-# ARG ssh_prv_key
-# ARG ssh_pub_key
 ARG gcp_creds
 
 RUN apt-get update && \
     apt-get install -y apt-utils dialog locales curl wget unzip git \
-    emacs-nox software-properties-common \
+    emacs-nox software-properties-common htop \
     openssh-server libpq-dev redis-server supervisor
 
 # Authorize SSH Host
 RUN mkdir -p /root/.ssh && \
     chmod 0700 /root/.ssh && \
     ssh-keyscan github.com > /root/.ssh/known_hosts
-
-# # Add the keys and set permissions using keys based as build args
-# RUN echo "$ssh_prv_key" > /root/.ssh/id_rsa && \
-#     echo "$ssh_pub_key" > /root/.ssh/id_rsa.pub && \
-#     chmod 600 /root/.ssh/id_rsa && \
-#     chmod 600 /root/.ssh/id_rsa.pub
 
 # Create GCP credentials file using base64 encoded build arg
 ENV GOOGLE_APPLICATION_CREDENTIALS=/var/secrets/gcp-creds.json
@@ -34,7 +24,6 @@ RUN base64 -d /var/secrets/gcp-creds-base64.json > $GOOGLE_APPLICATION_CREDENTIA
 RUN add-apt-repository -y ppa:deadsnakes/ppa
 RUN apt-get update
 RUN apt-get -y install python3.7 python3.7-venv python3.7-dev python3-pip
-# RUN update-alternatives --install /usr/bin/python3 python3 $(which python3.7) 1
 
 # aliases for the python system
 ENV SPIP python3.7 -m pip
@@ -91,24 +80,23 @@ RUN $PIP install --no-cache-dir /bench/modep-amlb/
 # install automlbenchmark in the same order as requirements.txt
 RUN (grep -v '^\s*#' | xargs -L 1 $PIP install --no-cache-dir) < /bench/automlbenchmark/requirements.txt
 
-# run setup for a single test framework
-# RUN $PY /bench/automlbenchmark/runbenchmark.py constantpredictor -s only
-
 ## run setup for all frameworks that we want to use
-RUN $PY /bench/automlbenchmark/runbenchmark.py autogluon -s only
-RUN $PY /bench/automlbenchmark/runbenchmark.py autosklearn -s only
-RUN $PY /bench/automlbenchmark/runbenchmark.py autoweka -s only
-RUN $PY /bench/automlbenchmark/runbenchmark.py flaml -s only
-RUN $PY /bench/automlbenchmark/runbenchmark.py gama -s only
-RUN $PY /bench/automlbenchmark/runbenchmark.py h2oautoml -s only
-RUN $PY /bench/automlbenchmark/runbenchmark.py hyperoptsklearn -s only
-RUN $PY /bench/automlbenchmark/runbenchmark.py mljarsupervised -s only
-RUN $PY /bench/automlbenchmark/runbenchmark.py mlnet -s only
-RUN $PY /bench/automlbenchmark/runbenchmark.py tpot -s only
+# RUN $PY /bench/automlbenchmark/runbenchmark.py autogluon -s only
+# RUN $PY /bench/automlbenchmark/runbenchmark.py autosklearn -s only
+# RUN $PY /bench/automlbenchmark/runbenchmark.py autoweka -s only
+# RUN $PY /bench/automlbenchmark/runbenchmark.py flaml -s only
+# RUN $PY /bench/automlbenchmark/runbenchmark.py gama -s only
+# RUN $PY /bench/automlbenchmark/runbenchmark.py h2oautoml -s only
+# RUN $PY /bench/automlbenchmark/runbenchmark.py hyperoptsklearn -s only
+# RUN $PY /bench/automlbenchmark/runbenchmark.py mljarsupervised -s only
+# RUN $PY /bench/automlbenchmark/runbenchmark.py mlnet -s only
+# RUN $PY /bench/automlbenchmark/runbenchmark.py tpot -s only
 RUN $PY /bench/automlbenchmark/runbenchmark.py constantpredictor -s only
-RUN $PY /bench/automlbenchmark/runbenchmark.py randomforest -s only
-RUN $PY /bench/automlbenchmark/runbenchmark.py tunedrandomforest -s only
+# RUN $PY /bench/automlbenchmark/runbenchmark.py randomforest -s only
+# RUN $PY /bench/automlbenchmark/runbenchmark.py tunedrandomforest -s only
 
 EXPOSE 8080
 
-CMD ["supervisord"]
+# CMD ["supervisord"]
+# ENTRYPOINT ["/bench/venv/bin/python3", "/bench/modep-amlb/modep_amlb/cli.py"]
+
