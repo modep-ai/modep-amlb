@@ -90,6 +90,9 @@ def on_success_train(framework_pk, outdir):
         gcp_path = f"tabular-frameworks/{framework.id}.zip"
         zip_and_upload(outdir, gcp_path)
         framework.gcp_path = gcp_path
+        # commit now so that we can fetch the logs for any exceptions
+        db.session.add(framework)
+        db.session.commit()
 
         #-----------------------------------------------------
         # metadata.json (one file per fold)
@@ -102,6 +105,8 @@ def on_success_train(framework_pk, outdir):
             metadatas.append(metadata)
 
         framework.fold_meta = metadatas
+        db.session.add(framework)
+        db.session.commit()
 
         if len(metadatas) == 0:
             framework.status = JobStatus.FAIL.name
@@ -172,7 +177,7 @@ def on_success_train(framework_pk, outdir):
 
         framework.other_metrics = other_metrics
         framework.fold_results = results.to_dict('records')
-        framework.version = results['version'].values[0]
+        framework.version = str(results['version'].values[0])
         framework.metric_name = results['metric'].values[0]
         framework.metric_value = metric_value
         framework.problem_type = results['type'].values[0]
@@ -180,6 +185,8 @@ def on_success_train(framework_pk, outdir):
             setattr(framework, c, float(results[c].sum()))
         framework.models_count = int(results['models_count'].sum())
         framework.info = '\n'.join([str(x) for x in results['info'].values])
+        db.session.add(framework)
+        db.session.commit()
 
         #-----------------------------------------------------
         # predictions.csv (one file per fold)
@@ -218,6 +225,8 @@ def on_success_train(framework_pk, outdir):
             framework_preds.status = JobStatus.SUCCESS.name
             db.session.add(framework_preds)
 
+        db.session.commit()
+
         #-----------------------------------------------------
         # model related (leaderboard.csv, models.txt)
 
@@ -243,6 +252,9 @@ def on_success_train(framework_pk, outdir):
 
         db.session.add(framework)
         db.session.commit()
+
+        if MODEP_FILE_CLEANUP:
+            remove_files(outdir)
 
     except Exception as e:
         framework.status = JobStatus.FAIL.name
