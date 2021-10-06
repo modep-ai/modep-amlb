@@ -1,4 +1,5 @@
 FROM ubuntu:18.04
+#FROM nvidia/cuda:11.0.3-runtime-ubuntu18.04
 
 WORKDIR /bench
 ENV DEBIAN_FRONTEND noninteractive

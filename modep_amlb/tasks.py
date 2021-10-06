@@ -87,7 +87,7 @@ def on_success_train(framework_pk, outdir):
 
     try:
         # upload entire output folder, removes input-data subdir with downloaded models in it
-        gcp_path = f"tabular-frameworks/{framework.id}.zip"
+        gcp_path = f"tabular-frameworks/{framework.id}/outdir.zip"
         zip_and_upload(outdir, gcp_path)
         framework.gcp_path = gcp_path
         # commit now so that we can fetch the logs for any exceptions
@@ -214,7 +214,7 @@ def on_success_train(framework_pk, outdir):
             dset = TabularDataset.query.filter_by(id=test_ids[model_fold]).one()
 
             # add predictions to DB
-            framework_preds = TabularFrameworkPredictions(framework.pk, dset.pk, model_fold, local_path)
+            framework_preds = TabularFrameworkPredictions(framework.user_pk, framework.pk, dset.pk, model_fold, local_path)
 
             # upload the predictions
             _, ext = os.path.splitext(local_path)
@@ -273,7 +273,7 @@ def on_failure_train(framework_pk, outdir=None, info=None):
 
     if outdir is not None:
         # upload entire output folder
-        framework.gcp_path = f"tabular-frameworks/{framework.id}.zip"
+        framework.gcp_path = f"tabular-frameworks/{framework.id}/outdir.zip"
         zip_and_upload(outdir, framework.gcp_path)
         if MODEP_FILE_CLEANUP:
             remove_files(outdir)
