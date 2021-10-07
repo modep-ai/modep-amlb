@@ -67,6 +67,7 @@ def train(
                 sys.exit(exit_code)
 
             status = on_success_train(framework_pk, outdir)
+            logger.info('train status: %s', status)
             if status == JobStatus.SUCCESS.name:
                 sys.exit(0)
             else:

@@ -256,6 +256,8 @@ def on_success_train(framework_pk, outdir):
         if MODEP_FILE_CLEANUP:
             remove_files(outdir)
 
+        return JobStatus.SUCCESS.name
+
     except Exception as e:
         framework.status = JobStatus.FAIL.name
         framework.info += ', error processing results'
@@ -286,6 +288,7 @@ def on_failure_train(framework_pk, outdir=None, info=None):
         framework.info += ', failure in training'
     db.session.add(framework)
     db.session.commit()
+    return JobStatus.FAIL.name
 
 
 def on_success_predict(preds_pk, outdir):
@@ -325,6 +328,7 @@ def on_success_predict(preds_pk, outdir):
     preds.status = JobStatus.SUCCESS.name
     db.session.add(preds)
     db.session.commit()
+    return JobStatus.SUCCESS.name
 
 
 def on_failure_predict(preds_pk, outdir=None, info=None):
@@ -336,6 +340,7 @@ def on_failure_predict(preds_pk, outdir=None, info=None):
         preds.info = 'failure getting predictions'
     db.session.add(preds)
     db.session.commit()
+    return JobStatus.FAIL.name
 
     
 @shared_task(name='tasks.runbenchmark', bind=True)
