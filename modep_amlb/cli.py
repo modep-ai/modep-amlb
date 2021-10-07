@@ -4,7 +4,10 @@ import sys
 import logging
 import fire
 
+from modep_common.enums import JobStatus
+
 from modep_amlb import app
+# TODO: move these from api_def into tasks
 from modep_amlb.v1.api_def import setup_train, setup_predict
 from modep_amlb.tasks import (
     get_runbenchmark_cmd,
@@ -62,8 +65,13 @@ def train(
             if exit_code != 0:
                 on_failure_train(framework_pk, outdir)
                 sys.exit(exit_code)
-            on_success_train(framework_pk, outdir)
-            sys.exit(0)
+
+            status = on_success_train(framework_pk, outdir)
+            if status == JobStatus.SUCCESS.name:
+                sys.exit(0)
+            else:
+                sys.exit(-1)
+
         except Exception as e:
             logger.exception(e)
             on_failure_train(framework_pk, outdir)
@@ -99,8 +107,13 @@ def predict(
             if exit_code != 0:
                 on_failure_predict(preds_pk, outdir)
                 sys.exit(exit_code)
-            on_success_predict(preds_pk, outdir)
-            sys.exit(0)
+
+            status = on_success_predict(preds_pk, outdir)
+            if status == JobStatus.SUCCESS.name:
+                sys.exit(0)
+            else:
+                sys.exit(-1)
+
         except Exception as e:
             logger.exception(e)
             on_failure_predict(preds_pk, outdir)

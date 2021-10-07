@@ -115,7 +115,7 @@ def on_success_train(framework_pk, outdir):
             db.session.commit()
             if MODEP_FILE_CLEANUP:
                 remove_files(outdir)
-            return
+            return JobStatus.FAIL.name
 
         # get the names of any metric columns in the results DataFrame below (same for all folds)
         metric_cols = metadatas[0]['metrics']
@@ -203,7 +203,7 @@ def on_success_train(framework_pk, outdir):
             db.session.commit()
             if MODEP_FILE_CLEANUP:
                 remove_files(outdir)
-            return
+            return JobStatus.FAIL.name
 
         # should be same length as `preds`
         test_ids = json.loads(framework.test_ids)
@@ -300,7 +300,7 @@ def on_success_predict(preds_pk, outdir):
         db.session.commit()
         if MODEP_FILE_CLEANUP:
             remove_files(outdir)
-        return
+        return JobStatus.FAIL.name
     elif len(fs) > 1:
         preds.status = JobStatus.FAIL.name
         preds.info = 'Multiple sets of predictions were created by the model'
@@ -308,7 +308,7 @@ def on_success_predict(preds_pk, outdir):
         db.session.commit()
         if MODEP_FILE_CLEANUP:
             remove_files(outdir)
-        return
+        return JobStatus.FAIL.name
 
     # predict only works with one dataset, so there's only one predictions file
     local_path = fs[0]
