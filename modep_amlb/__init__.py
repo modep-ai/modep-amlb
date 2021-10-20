@@ -4,6 +4,7 @@ import datetime
 import secrets
 from flask import Flask
 import flask_login
+
 # from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager
 
@@ -24,13 +25,15 @@ logger.setLevel(logging.DEBUG)
 app = Flask(__name__)
 
 app.logger.setLevel(logging.DEBUG)
-app.config['SQLALCHEMY_DATABASE_URI'] = settings.SQLALCHEMY_DATABASE_URI
-app.config['SQLALCHEMY_TRACK_MODIFICATION'] = False
-app.config['JSON_SORT_KEYS'] = False
-app.config['EXPLAIN_TEMPLATE_LOADING'] = False
-app.config['SECRET_KEY'] = secrets.token_urlsafe(24)
-app.config["JWT_SECRET_KEY"] = os.environ.get('JWT_SECRET_KEY', secrets.token_urlsafe(24))
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = datetime.timedelta(hours=2)
+app.config["SQLALCHEMY_DATABASE_URI"] = settings.SQLALCHEMY_DATABASE_URI
+app.config["SQLALCHEMY_TRACK_MODIFICATION"] = False
+app.config["JSON_SORT_KEYS"] = False
+app.config["EXPLAIN_TEMPLATE_LOADING"] = False
+app.config["SECRET_KEY"] = secrets.token_urlsafe(24)
+app.config["JWT_SECRET_KEY"] = os.environ.get(
+    "JWT_SECRET_KEY", secrets.token_urlsafe(24)
+)
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = datetime.timedelta(hours=2)
 
 app.register_blueprint(blueprint_v1, url_prefix="/v1")
 
@@ -50,12 +53,13 @@ jwt = JWTManager(app)
 
 from celery import Celery
 
+
 def make_celery(app):
     celery = Celery(
         app.import_name,
-        backend=app.config['CELERY_RESULT_BACKEND'],
-        broker=app.config['CELERY_BROKER_URL'],
-        include=['modep_amlb.tasks'],
+        backend=app.config["CELERY_RESULT_BACKEND"],
+        broker=app.config["CELERY_BROKER_URL"],
+        include=["modep_amlb.tasks"],
     )
     celery.conf.update(app.config)
 
@@ -67,9 +71,10 @@ def make_celery(app):
     celery.Task = ContextTask
     return celery
 
+
 app.config.update(
-    CELERY_BROKER_URL='redis://localhost:6379',
-    CELERY_RESULT_BACKEND='redis://localhost:6379'
+    CELERY_BROKER_URL="redis://localhost:6379",
+    CELERY_RESULT_BACKEND="redis://localhost:6379",
 )
 celery = make_celery(app)
 app.celery = celery
