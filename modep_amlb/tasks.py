@@ -198,7 +198,7 @@ def on_success_train(framework_pk, outdir):
 
         if len(fs) == 0:
             framework.status = JobStatus.FAIL.name
-            framework.info += ', no predictions'
+            framework.info += ' (no predictions)'
             db.session.add(framework)
             db.session.commit()
             if MODEP_FILE_CLEANUP:
@@ -260,7 +260,7 @@ def on_success_train(framework_pk, outdir):
 
     except Exception as e:
         framework.status = JobStatus.FAIL.name
-        framework.info += ', error processing results'
+        framework.info += ' (error processing results)'
         db.session.add(framework)
         db.session.commit()
         if MODEP_FILE_CLEANUP:
@@ -285,7 +285,7 @@ def on_failure_train(framework_pk, outdir=None, info=None):
     if info is not None:
         framework.info = info
     else:
-        framework.info += ', failure in training'
+        framework.info += ' (failure in training)'
     db.session.add(framework)
     db.session.commit()
     return JobStatus.FAIL.name
