@@ -127,3 +127,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# tmp docker files for each framework
+Dockerfile-*

@@ -43,7 +43,6 @@ RUN $SPIP install -U pip wheel
 RUN $SPY -m venv venv
 ENV PIP /bench/venv/bin/python3 -m pip
 ENV PY /bench/venv/bin/python3 -W ignore
-# RUN $PIP install -U pip==None wheel
 RUN $PIP install -U pip wheel
 
 VOLUME /input
@@ -56,8 +55,8 @@ COPY ./supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY ./redis.conf /etc/redis.conf
 
 # invalidate the docker cache for these repos so that git clone always clones the latest
-ADD https://api.github.com/repos/modep-ai/modep-common/git/refs/heads/main /bench/modep-common-version.json
-ADD https://api.github.com/repos/modep-ai/automlbenchmark/git/refs/heads/master /bench/automlbenchmark-version.json
+ADD https://api.github.com/repos/modep-ai/modep-common/git/refs/heads/main /bench/.modep-common-version.json
+ADD https://api.github.com/repos/modep-ai/automlbenchmark/git/refs/heads/master /bench/.automlbenchmark-version.json
 
 # get all code
 RUN git clone https://github.com/modep-ai/modep-common.git /bench/modep-common
@@ -92,12 +91,13 @@ RUN (grep -v '^\s*#' | xargs -L 1 $PIP install --no-cache-dir) < /bench/automlbe
 # RUN $PY /bench/automlbenchmark/runbenchmark.py mljarsupervised -s only
 # RUN $PY /bench/automlbenchmark/runbenchmark.py mlnet -s only
 # RUN $PY /bench/automlbenchmark/runbenchmark.py tpot -s only
-RUN $PY /bench/automlbenchmark/runbenchmark.py constantpredictor -s only
+# RUN $PY /bench/automlbenchmark/runbenchmark.py constantpredictor -s only
 # RUN $PY /bench/automlbenchmark/runbenchmark.py randomforest -s only
 # RUN $PY /bench/automlbenchmark/runbenchmark.py tunedrandomforest -s only
+
+RUN $PY /bench/automlbenchmark/runbenchmark.py {{ framework_name }} -s only
 
 EXPOSE 8080
 
 # CMD ["supervisord"]
 # ENTRYPOINT ["/bench/venv/bin/python3", "/bench/modep-amlb/modep_amlb/cli.py"]
-
