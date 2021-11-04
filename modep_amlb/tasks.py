@@ -224,7 +224,10 @@ def on_success_train(framework_pk, outdir):
             return JobStatus.FAIL.name
 
         # should be same length as `preds`
-        test_ids = json.loads(framework.test_ids)
+        if isinstance(framework.test_ids, str):
+            test_ids = json.loads(framework.test_ids)
+        else:
+            test_ids = framework.test_ids
 
         sc = StorageClient()
 

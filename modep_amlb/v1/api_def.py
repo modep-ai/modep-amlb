@@ -333,7 +333,11 @@ class TabularFrameworkPredict(MethodResource, Resource):
         sc = StorageClient()
 
         # TODO: training IDs aren't used but we need to have something
-        train_ids = json.loads(framework.train_ids)
+        if isinstance(framework.train_ids, str):
+            train_ids = json.loads(framework.train_ids)
+        else:
+            train_ids = framework.train_ids
+
         train = []
         for i, id in enumerate(train_ids):
             dset = tabular_dataset_by_id(id)
